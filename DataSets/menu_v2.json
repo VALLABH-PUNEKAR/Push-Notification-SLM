@@ -1,0 +1,407 @@
+{
+  "ice_cream_flavors": [
+    {
+      "name": "Belgian Choco Fudge",
+      "type": "frozen",
+      "spicy": false
+    },
+    {
+      "name": "Mango Tango",
+      "type": "frozen",
+      "spicy": false
+    },
+    {
+      "name": "Strawberry Cheesecake",
+      "type": "frozen",
+      "spicy": false
+    },
+    {
+      "name": "Pistachio Rose",
+      "type": "frozen",
+      "spicy": false
+    },
+    {
+      "name": "Cookies n' Cream",
+      "type": "frozen",
+      "spicy": false
+    },
+    {
+      "name": "Mint Chocolate Chip",
+      "type": "frozen",
+      "spicy": false
+    },
+    {
+      "name": "Vanilla Bean",
+      "type": "frozen",
+      "spicy": false
+    },
+    {
+      "name": "Salted Caramel Brownie",
+      "type": "frozen",
+      "spicy": false
+    },
+    {
+      "name": "Blue Velvet Cloud",
+      "type": "frozen",
+      "spicy": false
+    },
+    {
+      "name": "Red Velvet Swirl",
+      "type": "frozen",
+      "spicy": false
+    },
+    {
+      "name": "Hazelnut Praline",
+      "type": "frozen",
+      "spicy": false
+    },
+    {
+      "name": "Black Currant Bliss",
+      "type": "frozen",
+      "spicy": false
+    },
+    {
+      "name": "Coffee Toffee Crunch",
+      "type": "frozen",
+      "spicy": false
+    },
+    {
+      "name": "Coconut Almond Delight",
+      "type": "frozen",
+      "spicy": false
+    },
+    {
+      "name": "Rocky Road",
+      "type": "frozen",
+      "spicy": false
+    },
+    {
+      "name": "Butterscotch Pecan",
+      "type": "frozen",
+      "spicy": false
+    },
+    {
+      "name": "Lychee Rose",
+      "type": "frozen",
+      "spicy": false
+    },
+    {
+      "name": "Banana Caramel Swirl",
+      "type": "frozen",
+      "spicy": false
+    },
+    {
+      "name": "Choco Lava Brownie",
+      "type": "frozen",
+      "spicy": false
+    },
+    {
+      "name": "Tender Coconut",
+      "type": "frozen",
+      "spicy": false
+    },
+    {
+      "name": "Roasted Almond Fudge",
+      "type": "frozen",
+      "spicy": false
+    },
+    {
+      "name": "Watermelon Sorbet",
+      "type": "frozen",
+      "spicy": false
+    },
+    {
+      "name": "Kesar Pista",
+      "type": "frozen",
+      "spicy": false
+    },
+    {
+      "name": "Paan Surprise",
+      "type": "frozen",
+      "spicy": false
+    },
+    {
+      "name": "Oreo Overload",
+      "type": "frozen",
+      "spicy": false
+    },
+    {
+      "name": "Dark Chocolate Truffle",
+      "type": "frozen",
+      "spicy": false
+    },
+    {
+      "name": "Peanut Butter Cup",
+      "type": "frozen",
+      "spicy": false
+    },
+    {
+      "name": "Tiramisu Twist",
+      "type": "frozen",
+      "spicy": false
+    },
+    {
+      "name": "Guava Chili Sorbet",
+      "type": "frozen",
+      "spicy": true
+    },
+    {
+      "name": "Cardamom Saffron",
+      "type": "frozen",
+      "spicy": false
+    },
+    {
+      "name": "Salted Caramel Brownie Bliss",
+      "type": "frozen",
+      "spicy": false
+    },
+    {
+      "name": "Mango Chili Sorbet",
+      "type": "frozen",
+      "spicy": true
+    },
+    {
+      "name": "Mango Sorbet",
+      "type": "frozen",
+      "spicy": false
+    },
+    {
+      "name": "Coffee Caramel Swirl",
+      "type": "frozen",
+      "spicy": false
+    },
+    {
+      "name": "Premium Tiramisu Twist",
+      "type": "frozen",
+      "spicy": false
+    },
+    {
+      "name": "Rose Pistachio Brownie",
+      "type": "frozen",
+      "spicy": false
+    },
+    {
+      "name": "Petrichor Pistachio",
+      "type": "frozen",
+      "spicy": false
+    }
+  ],
+  "bakery_sweets": [
+    {
+      "name": "Red Velvet Cheesecake Bites",
+      "type": "baked",
+      "spicy": false
+    },
+    {
+      "name": "Choco Lava Cupcakes",
+      "type": "baked",
+      "spicy": false
+    },
+    {
+      "name": "Saffron Pistachio Kulfi Bar",
+      "type": "frozen",
+      "spicy": false
+    },
+    {
+      "name": "Belgian Brownie Bites",
+      "type": "baked",
+      "spicy": false
+    },
+    {
+      "name": "Caramel Pecan Tart",
+      "type": "baked",
+      "spicy": false
+    },
+    {
+      "name": "Tiramisu Jar",
+      "type": "chilled",
+      "spicy": false
+    },
+    {
+      "name": "Rasmalai Cake Slice",
+      "type": "chilled",
+      "spicy": false
+    },
+    {
+      "name": "Nutella Stuffed Croissant",
+      "type": "baked",
+      "spicy": false
+    },
+    {
+      "name": "Choco Chip Cookie Sandwich",
+      "type": "frozen",
+      "spicy": false
+    },
+    {
+      "name": "Mango Cheesecake Jar",
+      "type": "chilled",
+      "spicy": false
+    },
+    {
+      "name": "Black Forest Pastry",
+      "type": "baked",
+      "spicy": false
+    },
+    {
+      "name": "Gulab Jamun Cheesecake",
+      "type": "chilled",
+      "spicy": false
+    },
+    {
+      "name": "Lotus Biscoff Tart",
+      "type": "baked",
+      "spicy": false
+    },
+    {
+      "name": "Choco Walnut Brownie",
+      "type": "baked",
+      "spicy": false
+    },
+    {
+      "name": "Hot Fudge Sundae",
+      "type": "frozen",
+      "spicy": false
+    },
+    {
+      "name": "Cookie Dough Delight",
+      "type": "frozen",
+      "spicy": false
+    },
+    {
+      "name": "Triple Chocolate Brownie Sundae",
+      "type": "frozen",
+      "spicy": false
+    },
+    {
+      "name": "Gingerbread Kulfi Bar",
+      "type": "frozen",
+      "spicy": false
+    },
+    {
+      "name": "Rose Thandai Kulfi",
+      "type": "frozen",
+      "spicy": false
+    },
+    {
+      "name": "Tricolor Kulfi Bar",
+      "type": "frozen",
+      "spicy": false
+    },
+    {
+      "name": "Sheer Khurma Kulfi",
+      "type": "frozen",
+      "spicy": false
+    },
+    {
+      "name": "Mini Brownie Bites",
+      "type": "baked",
+      "spicy": false
+    },
+    {
+      "name": "Sorbet Cup",
+      "type": "frozen",
+      "spicy": false
+    },
+    {
+      "name": "Triple Scoop Sundae",
+      "type": "frozen",
+      "spicy": false
+    },
+    {
+      "name": "Premium Tiramisu Jar",
+      "type": "chilled",
+      "spicy": false
+    },
+    {
+      "name": "Nutella Croissant",
+      "type": "baked",
+      "spicy": false
+    }
+  ],
+  "formats": [
+    "tub",
+    "cone",
+    "sundae",
+    "milkshake",
+    "popsicle",
+    "bar",
+    "cup",
+    "family pack",
+    "mini tub",
+    "scoop",
+    "jar",
+    "slice",
+    "box of 6"
+  ],
+  "occasions_seasons": [
+    "Diwali",
+    "Holi",
+    "Christmas",
+    "New Year",
+    "Valentine's Day",
+    "Summer Heatwave",
+    "Monsoon",
+    "Weekend",
+    "Friday Night",
+    "Birthday Month",
+    "Exam Season Stress-Relief",
+    "Cricket Match Night",
+    "Festive Season",
+    "Winter Cozy Season"
+  ],
+  "notification_types": [
+    "new_launch",
+    "promo_discount",
+    "abandoned_cart",
+    "weather_triggered",
+    "loyalty_rewards",
+    "festive_seasonal",
+    "low_stock_alert",
+    "reorder_nudge",
+    "mood_lifestyle",
+    "flash_sale",
+    "free_delivery",
+    "flavor_spotlight",
+    "late_night_cravings",
+    "birthday_special",
+    "combo_offer"
+  ],
+  "emoji_kaomoji_bank": [
+    "🍦",
+    "🍨",
+    "🍧",
+    "🍫",
+    "🧁",
+    "🎂",
+    "🍪",
+    "🥭",
+    "🍓",
+    "🥥",
+    "☕",
+    "✨",
+    "🔥",
+    "❄️",
+    "☔",
+    "🌙",
+    "🎉",
+    "🛒",
+    "👀",
+    "💛",
+    "🤎",
+    "💙",
+    "❤️",
+    "🪔",
+    "(づ ̥ᴗ ̥́ )づ",
+    "(｀∀´)Ψ",
+    "(눈_눈)",
+    "(◕‿◕✿)",
+    "٩(ˊᗜˋ*)و",
+    "(ง •̀_•́)ง",
+    "(„• ֩ 良 ֩ •„)",
+    "(灬ºωº灬)",
+    "₍^.^₍",
+    "(≧◡≦)",
+    "ʘᴗʘ",
+    "(っ˘ω˘ς )"
+  ]
+}
