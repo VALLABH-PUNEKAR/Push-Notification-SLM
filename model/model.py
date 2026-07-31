@@ -32,18 +32,16 @@ Assumed interfaces:
 
 import torch
 import torch.nn as nn
+from typing import Optional, Tuple, List
 
 from .qvk_projections import QKVProjection
-
-# ---- ADJUST THESE THREE IMPORTS TO MATCH YOUR ACTUAL FILES ----
 from .norms import RMSNorm
 from .attention import GQAAttention
 from .swiglu import SwiGLUFeedForward
-# -----------------------------------------------------------------
-
 from .config import SLMConfig
 from ..Embedders.token_embedder import TokenEmbedding, LMHead
-from ..Embedders.rope import  RotaryEmbedding
+from ..Embedders.rope import RotaryEmbedding
+
 
 class TransformerBlock(nn.Module):
     def __init__(self, cfg: SLMConfig, rope: RotaryEmbedding):
@@ -56,9 +54,6 @@ class TransformerBlock(nn.Module):
             bias=cfg.bias,
             init_std=cfg.init_std,
         )
-        # Shared across all layers (angles depend only on head_dim/position,
-        # not on layer index) — passed in rather than built per-block so we
-        # don't hold num_layers duplicate cos/sin tables.
         self.rope = rope
 
         self.attn = GQAAttention(
@@ -71,50 +66,60 @@ class TransformerBlock(nn.Module):
         )
 
         self.ffn_norm = RMSNorm(cfg.hidden_size, eps=cfg.rms_eps)
-        
         self.ffn = SwiGLUFeedForward(
             hidden_size=cfg.hidden_size,
             intermediate_size=None,
             init_std=cfg.init_std,
         )
-
         self.dropout = nn.Dropout(cfg.dropout)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # --- Attention sub-layer (pre-norm + residual) ---
+    def forward(
+        self, 
+        x: torch.Tensor, 
+        past_kv: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
+        use_cache: bool = False
+    ) -> Tuple[torch.Tensor, Optional[Tuple[torch.Tensor, torch.Tensor]]]:
         residual = x
         h = self.attn_norm(x)
         Q, K, V = self.qkv(h)
-        Q, K = self.rope(Q, K)          # rotate Q/K before attention; V is untouched
-        attn_out = self.attn(Q, K, V)
+        
+        # RoPE applies based on current token sequence length and position
+        past_k, past_v = past_kv if past_kv is not None else (None, None)
+        past_len = past_k.shape[2] if past_k is not None else 0
+        Q, K = self.rope(Q, K,position_offset=past_len)          
+
+        # Call updated attention layer that returns output and updated (K, V)
+        
+        attn_res = self.attn(Q, K, V, past_key=past_k, past_value=past_v, use_cache=use_cache)
+        
+        if use_cache:
+            attn_out, present_k, present_v = attn_res
+            present_kv = (present_k, present_v)
+        else:
+            attn_out = attn_res[0] if isinstance(attn_res, (tuple, list)) else attn_res
+            present_kv = None
+
         x = residual + self.dropout(attn_out)
 
-        # --- FFN sub-layer (pre-norm + residual) ---
+        # FFN sub-layer
         residual = x
         h = self.ffn_norm(x)
         ffn_out = self.ffn(h)
         x = residual + self.dropout(ffn_out)
 
-        return x
+        return x, present_kv
 
 
 class SLM(nn.Module):
     def __init__(self, cfg: SLMConfig):
         super().__init__()
         self.cfg = cfg
-
-        # Tied input embedding / output head, per token_embedder.py.
-        # LMHead reads token_embedding.weight live at every forward call,
-        # so there is only ever one (vocab_size, hidden_size) tensor —
-        # cfg.tie_embeddings is assumed True, matching this module's design.
         self.token_embedding = TokenEmbedding(
             vocab_size=cfg.vocab_size,
             hidden_size=cfg.hidden_size,
             init_std=cfg.init_std,
         )
         self.lm_head = LMHead(self.token_embedding, bias=False)
-
-        # One shared RoPE table for every layer.
         self.rope = RotaryEmbedding(head_dim=cfg.head_dim, max_seq_len=cfg.max_seq_len)
 
         self.layers = nn.ModuleList(
@@ -123,23 +128,34 @@ class SLM(nn.Module):
         self.final_norm = RMSNorm(cfg.hidden_size, eps=cfg.rms_eps)
 
         if not cfg.tie_embeddings:
-            raise NotImplementedError(
-                "cfg.tie_embeddings=False is not supported by this TokenEmbedding/"
-                "LMHead pair — LMHead has no independent weight to untie. "
-                "Set cfg.tie_embeddings=True, or extend LMHead to optionally "
-                "own its own weight."
-            )
+            raise NotImplementedError("cfg.tie_embeddings=False is not supported.")
 
-    def forward(self, token_ids: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, 
+        token_ids: torch.Tensor, 
+        past_key_values: Optional[List[Tuple[torch.Tensor, torch.Tensor]]] = None,
+        use_cache: bool = False
+    ):
         """
-        token_ids: (batch, seq_len) long tensor
-        returns logits: (batch, seq_len, vocab_size)
+        If use_cache=True:
+            Returns: logits, present_key_values
+        If use_cache=False:
+            Returns: logits
         """
         x = self.token_embedding(token_ids)
-        for layer in self.layers:
-            x = layer(x)
+        presents = [] if use_cache else None
+
+        for i, layer in enumerate(self.layers):
+            layer_past = past_key_values[i] if past_key_values is not None else None
+            x, present_kv = layer(x, past_kv=layer_past, use_cache=use_cache)
+            if use_cache:
+                presents.append(present_kv)
+
         x = self.final_norm(x)
         logits = self.lm_head(x)
+
+        if use_cache:
+            return logits, presents
         return logits
 
     def num_params(self, exclude_embeddings: bool = False) -> int:

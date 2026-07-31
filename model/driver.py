@@ -45,6 +45,25 @@ def main():
     else:
         print("  -> Within range of 15M target.")
 
+    # ---------------- Dummy KV-Cache pass check ----------------
+    print("\n" + "=" * 60)
+    print("KV-CACHE FORWARD PASS CHECK")
+    print("=" * 60)
+    model.eval()
+    with torch.no_grad():
+        # Step 1: Prompt step
+        logits_prompt, past_kv = model(dummy_ids, use_cache=True)
+        print(f"  prompt logits shape: {tuple(logits_prompt.shape)}")
+        print(f"  cached layers      : {len(past_kv)}")
+        print(f"  layer 0 key shape  : {tuple(past_kv[0][0].shape)}")
+
+        # Step 2: Next token step (seq_len = 1)
+        next_token_id = torch.randint(0, cfg.vocab_size, (batch_size, 1))
+        logits_next, past_kv = model(next_token_id, past_key_values=past_kv, use_cache=True)
+        print(f"  next-step logits   : {tuple(logits_next.shape)} (expect: ({batch_size}, 1, {cfg.vocab_size}))")
+        assert logits_next.shape == (batch_size, 1, cfg.vocab_size), "KV Cache shape mismatch!"
+        print("  -> KV Cache check OK.")
+
     # ---------------- Dummy forward pass ----------------
     print("\n" + "=" * 60)
     print("FORWARD PASS SHAPE CHECK")
