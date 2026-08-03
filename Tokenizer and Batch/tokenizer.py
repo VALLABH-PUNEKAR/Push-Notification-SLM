@@ -1,36 +1,84 @@
 import os
-from datasets import load_dataset
+import sys
+import glob
+import pandas as pd
+from datasets import Dataset, DatasetDict
 from tokenizers import ByteLevelBPETokenizer
 import numpy as np
 import torch
 from tqdm.auto import tqdm
 
 # ─────────────────────────────────────────────
-# CONSTANTS — safe to define at top level
+# CONSTANTS
 # ─────────────────────────────────────────────
 VOCAB_FILE   = "push_notif_tokenizer-vocab.json"
 MERGES_FILE  = "push_notif_tokenizer-merges.txt"
-BLOCK_SIZE   = 128   # FIX 4: was 8, push notifications need at least 128
+BLOCK_SIZE   = 128
 BATCH_SIZE   = 32
 
+CONTEXT_KEYS = [
+    "scenario", "product", "category", "customer_type",
+    "user_activity", "time_of_day", "day_type", "season",
+    "weather", "discount", "urgency", "tone", "emoji"
+]
+
 
 # ─────────────────────────────────────────────
-# FIX 1+3: process() now uses your custom
-# tokenizer correctly — no more tiktoken refs
+# HELPER: ROBUST CSV READER & CLEANER
+# ─────────────────────────────────────────────
+def load_and_clean_csvs(file_paths):
+    """
+    Reads CSV files safely handling corrupt rows, unescaped commas, and 
+    extra fields via Python's CSV engine and on_bad_lines='skip'.
+    """
+    dfs = []
+    for fp in file_paths:
+        try:
+            # First attempt: Python engine to handle tricky quotes and commas
+            df = pd.read_csv(fp, engine="python", on_bad_lines="skip")
+        except Exception:
+            # Fallback attempt: Standard C engine skipping bad lines
+            df = pd.read_csv(fp, on_bad_lines="skip")
+
+        # Strip trailing/phantom un-named columns
+        unnamed_cols = [c for c in df.columns if str(c).startswith("Unnamed:")]
+        if unnamed_cols:
+            df = df.drop(columns=unnamed_cols)
+
+        # Keep only valid expected columns
+        expected_cols = CONTEXT_KEYS + ["notification"]
+        existing_cols = [c for c in expected_cols if c in df.columns]
+        df = df[existing_cols]
+
+        dfs.append(df)
+    
+    combined_df = pd.concat(dfs, ignore_index=True)
+    combined_df = combined_df.fillna("")
+    return Dataset.from_pandas(combined_df)
+
+
+# ─────────────────────────────────────────────
+# HELPER: FORMAT ROW INTO PROMPT STRING
+# ─────────────────────────────────────────────
+def format_example_prompt(example):
+    ctx_str = ", ".join(f"{k}={example.get(k, '')}" for k in CONTEXT_KEYS)
+    full_text = f"Context: {ctx_str} -> Notification: {example.get('notification', '')}"
+    return full_text
+
+
+# ─────────────────────────────────────────────
+# TOKENIZATION PROCESS FOR DATASET MAP
 # ─────────────────────────────────────────────
 def process(example):
-    # Load tokenizer inside the function so each
-    # worker process can access it safely
     tok = ByteLevelBPETokenizer(VOCAB_FILE, MERGES_FILE)
+    full_text = format_example_prompt(example)
 
-    text = example["text"]
-    if not isinstance(text, str) or len(text.strip()) == 0:
+    if not isinstance(full_text, str) or len(full_text.strip()) == 0:
         return {"ids": [], "len": 0}
 
-    encoding = tok.encode(text.strip())
+    encoding = tok.encode(full_text.strip())
     ids = encoding.ids
 
-    # Add end-of-sequence token at end of every notification
     eos_id = tok.token_to_id("<|eos|>")
     ids.append(eos_id)
 
@@ -38,8 +86,7 @@ def process(example):
 
 
 # ─────────────────────────────────────────────
-# FIX 5: get_batch stays outside main but
-# does NOT depend on global mutable state
+# BATCH GENERATOR FOR MODEL TRAINING
 # ─────────────────────────────────────────────
 def get_batch(split, block_size=BLOCK_SIZE, batch_size=BATCH_SIZE):
     filename = "train.bin" if split == "train" else "validation.bin"
@@ -67,76 +114,101 @@ def get_batch(split, block_size=BLOCK_SIZE, batch_size=BATCH_SIZE):
 
 
 # ─────────────────────────────────────────────
-# MAIN BLOCK — everything that "runs" goes here
-# FIX 2: tokenizer training moved inside here
+# MAIN EXECUTION PIPELINE
 # ─────────────────────────────────────────────
 if __name__ == "__main__":
 
-    # STEP 1 — Train tokenizer only if not already saved
+    # 1. Discover CSV file(s) to use
+    if len(sys.argv) > 1:
+        all_csvs = [sys.argv[1]]
+    else:
+        all_csvs = sorted(glob.glob("all.csv"))
+        all_csvs = [f for f in all_csvs if not f.startswith("train_corpus")]
+
+    print(f"Found {len(all_csvs)} CSV dataset file(s).")
+
+    # Split dataset files into train/validation sets
+    if len(all_csvs) > 1:
+        train_files = all_csvs[:-1]
+        val_files = [all_csvs[-1]]
+    else:
+        train_files = all_csvs
+        val_files = all_csvs
+
+    # Load and clean datasets directly via Pandas
+    ds = DatasetDict({
+        "train": load_and_clean_csvs(train_files),
+        "validation": load_and_clean_csvs(val_files)
+    })
+
+    # 2. Train BPE Tokenizer on dataset corpus
     if not os.path.exists(VOCAB_FILE) or not os.path.exists(MERGES_FILE):
-        print("Training custom BPE tokenizer...")
+        print("Building formatted prompt corpus for tokenizer training...")
+        corpus_filename = "train_corpus.txt"
+        
+        with open(corpus_filename, "w", encoding="utf-8") as f:
+            for example in ds["train"]:
+                prompt_text = format_example_prompt(example)
+                f.write(prompt_text + "\n")
+
+        print("Training custom Byte-Level BPE tokenizer...")
         tokenizer = ByteLevelBPETokenizer()
         tokenizer.train(
-            files=["your_notifications.txt"],
-            vocab_size=12000,
+            files=[corpus_filename],
+            vocab_size=1000,
             min_frequency=2,
             special_tokens=["<|pad|>", "<|bos|>", "<|eos|>", "<|unk|>"]
         )
         tokenizer.save_model(".", "push_notif_tokenizer")
-        print(f"Tokenizer saved! Vocab size: {tokenizer.get_vocab_size()}")
+        print(f"Tokenizer trained & saved! Vocab size: {tokenizer.get_vocab_size()}")
+
+        if os.path.exists(corpus_filename):
+            os.remove(corpus_filename)
     else:
-        print("Tokenizer already trained — loading from disk")
+        print("Tokenizer already exists — loading from disk.")
 
-    # STEP 2 — Load dataset
-    csv_files = {
-        "train":      ["ic1.csv", "ic2.csv", "ic3.csv", "ic4.csv"],
-        "validation": ["icv.csv"]
-    }
-    ds = load_dataset("csv", data_files=csv_files)
-
-    # STEP 3 — Tokenize and write .bin files
+    # 3. Tokenize and build train.bin / validation.bin
     if not os.path.exists("train.bin") or not os.path.exists("validation.bin"):
+        remove_cols = ds["train"].column_names
+
         tokenized = ds.map(
             process,
-            remove_columns=["text"],
+            remove_columns=remove_cols,
             desc="Tokenizing dataset",
-            num_proc=4   # lowered from 8 — safer on most machines
+            num_proc=4
         )
 
         for split, dset in tokenized.items():
-            # Filter out empty examples
             dset = dset.filter(lambda x: x["len"] > 0)
-
             arr_len = np.sum(dset["len"], dtype=np.uint64)
             filename = f"{split}.bin"
-            arr = np.memmap(filename, mode="w+",
-                            shape=(arr_len,), dtype=np.uint16)
+            arr = np.memmap(filename, mode="w+", shape=(arr_len,), dtype=np.uint16)
 
             total_batches = 1024
             idx = 0
-            for batch_idx in tqdm(range(total_batches),
-                                  desc=f"Writing {split}.bin"):
-                batch = dset.shard(num_shards=total_batches,
-                                   index=batch_idx, contiguous=True)
-                arr_batch = np.concatenate(batch["ids"])
-                arr[idx : idx + len(arr_batch)] = arr_batch
-                idx += len(arr_batch)
+            for batch_idx in tqdm(range(total_batches), desc=f"Writing {split}.bin"):
+                batch = dset.shard(num_shards=total_batches, index=batch_idx, contiguous=True)
+                if len(batch["ids"]) > 0:
+                    arr_batch = np.concatenate(batch["ids"])
+                    arr[idx : idx + len(arr_batch)] = arr_batch
+                    idx += len(arr_batch)
             arr.flush()
-            print(f"{split}.bin written — {arr_len:,} tokens total")
+            print(f"{split}.bin written — {arr_len:,} total tokens")
     else:
-        print("Bin files already exist — skipping tokenization")
+        print("Bin files already exist — skipping tokenization step.")
 
-    # STEP 4 — Quick sanity check
-    print("\n--- Sanity Check ---")
+    # 4. Sanity Check
+    print("\n--- Pipeline Verification ---")
     tok_check = ByteLevelBPETokenizer(VOCAB_FILE, MERGES_FILE)
     print(f"Vocab size : {tok_check.get_vocab_size()}")
 
-    sample = tok_check.encode("🔔 Your order is out for delivery!")
-    print(f"Sample     : 🔔 Your order is out for delivery!")
-    print(f"Token IDs  : {sample.ids}")
-    print(f"Tokens     : {sample.tokens}")
+    sample_str = "Context: scenario=Discounts & Promotions, product=Triple Chocolate Brownie Sundae -> Notification: 🍨 Discount unlocked!"
+    encoded = tok_check.encode(sample_str)
+    print(f"Sample Input : {sample_str}")
+    print(f"Token IDs    : {encoded.ids[:12]}...")
+    print(f"Tokens       : {encoded.tokens[:12]}...")
 
     xb, yb = get_batch("train")
-    print(f"\nBatch x shape : {xb.shape}")  # should be [32, 128]
-    print(f"Batch y shape : {yb.shape}")  # should be [32, 128]
-    print("All good! Ready to build the model.")
+    print(f"\nBatch x shape : {xb.shape}")
+    print(f"Batch y shape : {yb.shape}")
+    print("Ready to begin 15M SLM model training!")
