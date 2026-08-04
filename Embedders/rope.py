@@ -97,26 +97,37 @@ class RotaryEmbedding(nn.Module):
         self.register_buffer("cos_cached", cos, persistent=False)
         self.register_buffer("sin_cached", sin, persistent=False)
 
-    def forward(self, q: torch.Tensor, k: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def forward(
+        self, q: torch.Tensor, k: torch.Tensor, position_offset: int = 0
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Args:
             q, k: (batch, num_heads, seq_len, head_dim) — works for GQA too,
                   since K's num_heads (kv groups) is just a different size
                   in dim 1; rotation is applied per-position, per-head,
                   identically regardless of how many heads there are.
+            position_offset: absolute position of the first token in this
+                  call. Defaults to 0, which reproduces the original
+                  from-zero training behavior exactly. During cached
+                  generation, the caller passes the current KV-cache
+                  length (i.e. how many tokens were already generated)
+                  before this call's new token(s) are added. RoPE does
+                  not track this itself — it must be supplied by whatever
+                  is managing the cache at the model level.
 
         Returns:
             (q_rotated, k_rotated), same shapes as inputs.
         """
         seq_len = q.shape[-2]
-        if seq_len > self.max_seq_len:
+        end_pos = position_offset + seq_len
+        if end_pos > self.max_seq_len:
             raise ValueError(
-                f"seq_len ({seq_len}) exceeds max_seq_len ({self.max_seq_len}) "
-                f"the RotaryEmbedding was built for."
+                f"position_offset ({position_offset}) + seq_len ({seq_len}) = {end_pos} "
+                f"exceeds max_seq_len ({self.max_seq_len}) the RotaryEmbedding was built for."
             )
 
-        cos = self.cos_cached[:seq_len]  # (seq_len, head_dim)
-        sin = self.sin_cached[:seq_len]  # (seq_len, head_dim)
+        cos = self.cos_cached[position_offset:end_pos]  # (seq_len, head_dim)
+        sin = self.sin_cached[position_offset:end_pos]  # (seq_len, head_dim)
 
         q_rot = apply_rope(q, cos, sin)
         k_rot = apply_rope(k, cos, sin)
@@ -174,5 +185,37 @@ if __name__ == "__main__":
     )
     print(f"Relative-position check passed: dot@offset{offset} consistent "
           f"({dot_low.item():.4f} ≈ {dot_high.item():.4f}) regardless of absolute position")
+
+    # 4. Regression check: position_offset=0 (default) must reproduce the
+    # original from-zero training behavior exactly.
+    q_rot_default, k_rot_default = rope(q, k)
+    q_rot_explicit_zero, k_rot_explicit_zero = rope(q, k, position_offset=0)
+    assert torch.equal(q_rot_default, q_rot_explicit_zero), "Default offset diverged from offset=0!"
+    assert torch.equal(k_rot_default, k_rot_explicit_zero), "Default offset diverged from offset=0!"
+    print("Offset=0 regression check passed: matches original training-time behavior.")
+
+    # 5. Cached-vs-full-sequence equivalence: rotating a full sequence in one
+    # call must match rotating it one token at a time with increasing offsets.
+    q_full, k_full = rope(q, k)  # offset=0, full seq_len at once
+
+    q_stepped = torch.zeros_like(q_full)
+    k_stepped = torch.zeros_like(k_full)
+    for pos in range(seq_len):
+        q_tok = q[:, :, pos : pos + 1, :]  # (batch, num_heads, 1, head_dim)
+        k_tok = k[:, :, pos : pos + 1, :]
+        q_r, k_r = rope(q_tok, k_tok, position_offset=pos)
+        q_stepped[:, :, pos : pos + 1, :] = q_r
+        k_stepped[:, :, pos : pos + 1, :] = k_r
+
+    assert torch.allclose(q_full, q_stepped, atol=1e-6), "Stepped Q rotation diverged from full-sequence Q rotation!"
+    assert torch.allclose(k_full, k_stepped, atol=1e-6), "Stepped K rotation diverged from full-sequence K rotation!"
+    print("Cached-vs-full-sequence equivalence check passed.")
+
+    # 6. Bounds check: offset + seq_len exceeding max_seq_len must raise.
+    try:
+        rope(q[:, :, :1, :], k[:, :, :1, :], position_offset=max_seq_len)
+        raise AssertionError("Expected ValueError for out-of-bounds offset, none raised!")
+    except ValueError:
+        print("Out-of-bounds offset check passed: ValueError raised as expected.")
 
     print("All self-tests passed.")

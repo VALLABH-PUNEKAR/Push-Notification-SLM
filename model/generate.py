@@ -106,13 +106,22 @@ def generate(model, cfg, tokenizer, prompt, max_new_tokens, temperature, top_k, 
     ids = tokenizer.encode(prompt).ids
     tokens = torch.tensor(ids, dtype=torch.long, device=device).unsqueeze(0)  # (1, seq_len)
 
-    for _ in range(max_new_tokens):
-        # No KV-cache: truncate to the last max_seq_len tokens each step
-        # so we never exceed what RoPE / the causal mask were built for.
-        tokens_cond = tokens[:, -cfg.max_seq_len:]
+    past_key_values = None
+    
+    for i in range(max_new_tokens):
+        # On token 0, feed entire prompt. On token >0, feed ONLY the last predicted token.
+        if past_key_values is None:
+            model_input = tokens[:, -cfg.max_seq_len:]
+        else:
+            model_input = tokens[:, -1:]
 
-        logits = model(tokens_cond)          # (1, seq_len, vocab_size)
-        logits = logits[:, -1, :]             # last position -> (1, vocab_size)
+        logits, past_key_values = model(
+            model_input, 
+            past_key_values=past_key_values, 
+            use_cache=True
+        )
+
+        logits = logits[:, -1, :]  # last position -> (1, vocab_size)
         logits = logits / max(temperature, 1e-5)
 
         if top_k is not None:
