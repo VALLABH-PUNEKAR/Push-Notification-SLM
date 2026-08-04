@@ -161,7 +161,7 @@ def parse_args():
     p.add_argument("--eval_every", type=int, default=250)
     p.add_argument("--eval_iters", type=int, default=50)
 
-    p.add_argument("--save_every", type=int, default=500)
+    p.add_argument("--save_every", type=int, default=300)
     p.add_argument("--keep_last_n", type=int, default=3,help="Number of rolling step-checkpoints to retain (best is always kept too)")
     p.add_argument("--resume", action="store_true",
                    help="Resume from out_dir/latest.pt if it exists")

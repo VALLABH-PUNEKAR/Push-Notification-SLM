@@ -1,8 +1,10 @@
 import os
 import sys
 import glob
+import argparse
 import pandas as pd
 from datasets import Dataset, DatasetDict
+from sklearn.model_selection import train_test_split
 from tokenizers import ByteLevelBPETokenizer
 import numpy as np
 import torch
@@ -15,6 +17,7 @@ VOCAB_FILE   = "push_notif_tokenizer-vocab.json"
 MERGES_FILE  = "push_notif_tokenizer-merges.txt"
 BLOCK_SIZE   = 128
 BATCH_SIZE   = 32
+VAL_SPLIT    = 0.1   # fraction held out for validation when only one CSV is given
 
 CONTEXT_KEYS = [
     "scenario", "product", "category", "customer_type",
@@ -28,7 +31,7 @@ CONTEXT_KEYS = [
 # ─────────────────────────────────────────────
 def load_and_clean_csvs(file_paths):
     """
-    Reads CSV files safely handling corrupt rows, unescaped commas, and 
+    Reads CSV files safely handling corrupt rows, unescaped commas, and
     extra fields via Python's CSV engine and on_bad_lines='skip'.
     """
     dfs = []
@@ -51,10 +54,10 @@ def load_and_clean_csvs(file_paths):
         df = df[existing_cols]
 
         dfs.append(df)
-    
+
     combined_df = pd.concat(dfs, ignore_index=True)
     combined_df = combined_df.fillna("")
-    return Dataset.from_pandas(combined_df)
+    return combined_df
 
 
 # ─────────────────────────────────────────────
@@ -88,8 +91,8 @@ def process(example):
 # ─────────────────────────────────────────────
 # BATCH GENERATOR FOR MODEL TRAINING
 # ─────────────────────────────────────────────
-def get_batch(split, block_size=BLOCK_SIZE, batch_size=BATCH_SIZE):
-    filename = "train.bin" if split == "train" else "validation.bin"
+def get_batch(split, data_dir=".", block_size=BLOCK_SIZE, batch_size=BATCH_SIZE):
+    filename = os.path.join(data_dir, "train.bin" if split == "train" else "validation.bin")
     data = np.memmap(filename, dtype=np.uint16, mode="r")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -116,36 +119,60 @@ def get_batch(split, block_size=BLOCK_SIZE, batch_size=BATCH_SIZE):
 # ─────────────────────────────────────────────
 # MAIN EXECUTION PIPELINE
 # ─────────────────────────────────────────────
-if __name__ == "__main__":
+def main():
+    parser = argparse.ArgumentParser(description="Tokenize push-notification CSV data")
+    parser.add_argument("csv_path", nargs="?", default=None,
+                         help="Path to a specific CSV file. Defaults to glob('all.csv') in cwd.")
+    parser.add_argument("--data_dir", type=str, default=".",
+                         help="Where to write train.bin / validation.bin. Must match the "
+                              "--data_dir you pass to train.py.")
+    parser.add_argument("--val_split", type=float, default=VAL_SPLIT,
+                         help="Fraction of rows held out for validation when only one CSV is given.")
+    args = parser.parse_args()
+
+    os.makedirs(args.data_dir, exist_ok=True)
 
     # 1. Discover CSV file(s) to use
-    if len(sys.argv) > 1:
-        all_csvs = [sys.argv[1]]
+    if args.csv_path:
+        all_csvs = [args.csv_path]
     else:
         all_csvs = sorted(glob.glob("all.csv"))
         all_csvs = [f for f in all_csvs if not f.startswith("train_corpus")]
 
     print(f"Found {len(all_csvs)} CSV dataset file(s).")
 
-    # Split dataset files into train/validation sets
+    # Split into train/validation.
+    #
+    # FIX: with a single CSV file, the old logic set train_files == val_files,
+    # meaning "validation" was literally the training data — val_loss was
+    # meaningless and checkpoint.py's "keep best val_loss" protection had
+    # nothing real to select on. Now we always produce a genuine held-out
+    # split, either by file (multi-file case) or by row (single-file case).
     if len(all_csvs) > 1:
         train_files = all_csvs[:-1]
         val_files = [all_csvs[-1]]
+        ds = DatasetDict({
+            "train": Dataset.from_pandas(load_and_clean_csvs(train_files)),
+            "validation": Dataset.from_pandas(load_and_clean_csvs(val_files)),
+        })
     else:
-        train_files = all_csvs
-        val_files = all_csvs
+        full_df = load_and_clean_csvs(all_csvs)
+        train_df, val_df = train_test_split(
+            full_df, test_size=args.val_split, random_state=42
+        )
+        ds = DatasetDict({
+            "train": Dataset.from_pandas(train_df.reset_index(drop=True)),
+            "validation": Dataset.from_pandas(val_df.reset_index(drop=True)),
+        })
 
-    # Load and clean datasets directly via Pandas
-    ds = DatasetDict({
-        "train": load_and_clean_csvs(train_files),
-        "validation": load_and_clean_csvs(val_files)
-    })
+    print(f"  train rows      : {len(ds['train']):,}")
+    print(f"  validation rows : {len(ds['validation']):,}")
 
     # 2. Train BPE Tokenizer on dataset corpus
     if not os.path.exists(VOCAB_FILE) or not os.path.exists(MERGES_FILE):
         print("Building formatted prompt corpus for tokenizer training...")
         corpus_filename = "train_corpus.txt"
-        
+
         with open(corpus_filename, "w", encoding="utf-8") as f:
             for example in ds["train"]:
                 prompt_text = format_example_prompt(example)
@@ -160,6 +187,7 @@ if __name__ == "__main__":
             special_tokens=["<|pad|>", "<|bos|>", "<|eos|>", "<|unk|>"]
         )
         tokenizer.save_model(".", "push_notif_tokenizer")
+        tokenizer.save("tokenizer.json")  # unified format for ExecuTorch / mobile runtime
         print(f"Tokenizer trained & saved! Vocab size: {tokenizer.get_vocab_size()}")
 
         if os.path.exists(corpus_filename):
@@ -167,8 +195,11 @@ if __name__ == "__main__":
     else:
         print("Tokenizer already exists — loading from disk.")
 
-    # 3. Tokenize and build train.bin / validation.bin
-    if not os.path.exists("train.bin") or not os.path.exists("validation.bin"):
+    # 3. Tokenize and build train.bin / validation.bin (written into --data_dir)
+    train_bin_path = os.path.join(args.data_dir, "train.bin")
+    val_bin_path = os.path.join(args.data_dir, "validation.bin")
+
+    if not os.path.exists(train_bin_path) or not os.path.exists(val_bin_path):
         remove_cols = ds["train"].column_names
 
         tokenized = ds.map(
@@ -181,7 +212,7 @@ if __name__ == "__main__":
         for split, dset in tokenized.items():
             dset = dset.filter(lambda x: x["len"] > 0)
             arr_len = np.sum(dset["len"], dtype=np.uint64)
-            filename = f"{split}.bin"
+            filename = os.path.join(args.data_dir, f"{split}.bin")
             arr = np.memmap(filename, mode="w+", shape=(arr_len,), dtype=np.uint16)
 
             total_batches = 1024
@@ -193,9 +224,9 @@ if __name__ == "__main__":
                     arr[idx : idx + len(arr_batch)] = arr_batch
                     idx += len(arr_batch)
             arr.flush()
-            print(f"{split}.bin written — {arr_len:,} total tokens")
+            print(f"{filename} written — {arr_len:,} total tokens")
     else:
-        print("Bin files already exist — skipping tokenization step.")
+        print(f"Bin files already exist in {args.data_dir} — skipping tokenization step.")
 
     # 4. Sanity Check
     print("\n--- Pipeline Verification ---")
@@ -208,7 +239,11 @@ if __name__ == "__main__":
     print(f"Token IDs    : {encoded.ids[:12]}...")
     print(f"Tokens       : {encoded.tokens[:12]}...")
 
-    xb, yb = get_batch("train")
+    xb, yb = get_batch("train", data_dir=args.data_dir)
     print(f"\nBatch x shape : {xb.shape}")
     print(f"Batch y shape : {yb.shape}")
     print("Ready to begin 15M SLM model training!")
+
+
+if __name__ == "__main__":
+    main()
